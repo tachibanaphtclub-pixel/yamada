@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>写真部 提出＆一覧アプリ</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f5f5f5; padding: 20px; display: flex; flex-direction: column; align-items: center; margin: 0; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); width: 100%; max-width: 400px; margin-bottom: 30px; }
+        h1, h2 { font-size: 20px; margin-bottom: 20px; text-align: center; color: #333; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #555; font-size: 14px; }
+        input[type="text"], input[type="file"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #statusMessage { margin-top: 15px; text-align: center; font-weight: bold; font-size: 14px; }
+        
+        /* 一覧表示用のスタイル */
+        .gallery-container { width: 100%; max-width: 800px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; margin-top: 15px; }
+        .photo-card { border: 1px solid #eee; border-radius: 6px; overflow: hidden; background: #fff; text-align: center; }
+        .photo-card img { width: 100%; height: 120px; object-fit: cover; background: #eaeeef; }
+        .photo-name { font-size: 12px; padding: 8px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* 🔑 ロック画面のスタイル */
+        #lockScreen { 
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
+            background-color: #f5f5f5; z-index: 9999; 
+            display: flex; justify-content: center; align-items: center; 
+        }
+        .lock-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 90%; max-width: 350px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<!-- 🔑 パスワードロック画面（正しい合言葉を入れるまでアプリを隠します） -->
+<div id="lockScreen">
+    <div class="lock-box">
+        <h2>🔒 写真提出アプリ</h2>
+        <p style="font-size: 14px; color: #666; margin-bottom: 20px;">部員専用のページです。<br>合言葉を入力してください。</p>
+        <div class="form-group" style="text-align: left;">
+            <input type="password" id="appPassword" placeholder="ここに合言葉を入力">
+        </div>
+        <button onclick="checkPassword()">ロック解除</button>
+        <div id="lockError" style="color: red; margin-top: 15px; font-weight: bold; font-size: 14px;"></div>
+    </div>
+</div>
+
+<!-- 📷 提出フォーム（最初は見えません） -->
+<div class="container" id="mainApp" style="display: none;">
+    <h1>📷 山田さん 作品提出</h1>
+    <div class="form-group">
+        <label for="memberName">部員名</label>
+        <input type="text" id="memberName" placeholder="例：山田" required>
+    </div>
+    <div class="form-group">
+        <label for="photoFile">写真を選択</label>
+        <input type="file" id="photoFile" accept="image/*" required>
+    </div>
+    <button id="uploadBtn" onclick="uploadPhoto()">アップロードする</button>
+    <div id="statusMessage"></div>
+</div>
+
+<!-- 🖼️ 作品一覧（最初は見えません） -->
+<div class="gallery-container" id="galleryApp" style="display: none;">
+    <h2>🖼️ あなたの提出作品一覧</h2>
+    <div id="loadingText" style="text-align: center; color: #666;">読み込み中...</div>
+    <div class="grid" id="photoGrid"></div>
+</div>
+
+<script>
+// 🔑 【設定】部活内だけで共有する「合言葉」を決めてください
+const CORRECT_PASSWORD = 'Tbphotoclub'; 
+
+// ★ここに新しく更新デプロイしたGASのウェブアプリURLを入れてください！
+const gasUrl = 'https://script.google.com/macros/s/AKfycbyQmIDTRF2AYTMSKG9iUDzKOnpkdEPsh-mzGIxyEZMkeJXGv8OuwX4Hga5b9NpZHLIb/exec';
+
+// パスワードをチェックする関数
+function checkPassword() {
+    const inputPass = document.getElementById('appPassword').value;
+    const lockError = document.getElementById('lockError');
+
+    if (inputPass === CORRECT_PASSWORD) {
+        // パスワードが合っていたら、ロック画面を消してアプリを表示
+        document.getElementById('lockScreen').style.display = 'none';
+        document.getElementById('mainApp').style.display = 'block';
+        document.getElementById('galleryApp').style.display = 'block';
+        // ログイン成功後に一覧を読み込む
+        loadPhotos();
+    } else {
+        // 間違っていたらエラーメッセージを表示
+        lockError.innerText = '合言葉が違います！';
+        document.getElementById('appPassword').value = '';
+    }
+}
+
+const toBase64 = file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+});
+
+async function loadPhotos() {
+    const grid = document.getElementById('photoGrid');
+    const loading = document.getElementById('loadingText');
+    grid.innerHTML = '';
+    loading.style.display = 'block';
+
+    try {
+        const response = await fetch(gasUrl);
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            loading.style.display = 'none';
+            result.data.forEach(photo => {
+                const card = document.createElement('div');
+                card.className = 'photo-card';
+                card.innerHTML = `
+                    <img src="${photo.url}" alt="${photo.name}" loading="lazy">
+                    <div class="photo-name" title="${photo.name}">${photo.name}</div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+    } catch (error) {
+        loading.innerText = '一覧の読み込みに失敗しました。';
+        console.error(error);
+    }
+}
+
+async function uploadPhoto() {
+    const fileInput = document.getElementById('photoFile');
+    const nameInput = document.getElementById('memberName');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const statusMsg = document.getElementById('statusMessage');
+
+    if (!nameInput.value.trim() || !fileInput.files[0]) {
+        alert('部員名と写真の両方を入力してください。');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    uploadBtn.disabled = true;
+    statusMsg.style.color = '#333';
+    statusMsg.innerText = 'アップロード中...';
+
+    try {
+        const base64Data = await toBase64(file);
+        const response = await fetch(gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+                filename: `${nameInput.value.trim()}_${file.name}`,
+                mimeType: file.type,
+                image: base64Data.split(',')[1]
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            statusMsg.style.color = 'green';
+            statusMsg.innerText = '正常にアップロードされました！';
+            fileInput.value = '';
+            nameInput.value = '';
+            loadPhotos();
+        } else {
+            throw new Error(result.message);
+        }
+    } catch (error) {
+        statusMsg.style.color = 'red';
+        statusMsg.innerText = 'エラーが発生しました。';
+    } finally {
+        uploadBtn.disabled = false;
+    }
+}
+</script>
+
+</body>
+</html>
