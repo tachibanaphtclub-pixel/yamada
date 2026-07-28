@@ -14,16 +14,17 @@
         button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:hover { background-color: #0056b3; }
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
-        #statusMessage { margin-top: 15px; text-align: center; font-weight: bold; font-size: 14px; }
         
-        /* 一覧表示用のスタイル */
+        /* 📢 進捗・注意文のスタイル */
+        #statusMessage { margin-top: 15px; text-align: center; font-weight: bold; font-size: 15px; line-height: 1.5; }
+        .warning-text { color: #dc3545; font-size: 12px; font-weight: bold; margin-top: 5px; display: block; }
+        
         .gallery-container { width: 100%; max-width: 800px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; margin-top: 15px; }
         .photo-card { border: 1px solid #eee; border-radius: 6px; overflow: hidden; background: #fff; text-align: center; }
         .photo-card img { width: 100%; height: 120px; object-fit: cover; background: #eaeeef; }
         .photo-name { font-size: 12px; padding: 8px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        /* 🔑 ロック画面のスタイル */
         #lockScreen { 
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
             background-color: #f5f5f5; z-index: 9999; 
@@ -34,7 +35,7 @@
 </head>
 <body>
 
-<!-- 🔑 パスワードロック画面（正しい合言葉を入れるまでアプリを隠します） -->
+<!-- 🔑 パスワードロック画面 -->
 <div id="lockScreen">
     <div class="lock-box">
         <h2>🔒 写真提出アプリ</h2>
@@ -47,7 +48,7 @@
     </div>
 </div>
 
-<!-- 📷 提出フォーム（最初は見えません） -->
+<!-- 📷 提出フォーム -->
 <div class="container" id="mainApp" style="display: none;">
     <h1>📷 山田さん 作品提出</h1>
     <div class="form-group">
@@ -55,14 +56,16 @@
         <input type="text" id="memberName" placeholder="例：山田" required>
     </div>
     <div class="form-group">
-        <label for="photoFile">写真を選択</label>
-        <input type="file" id="photoFile" accept="image/*" required>
+        <label for="photoFile">写真を選択（最大5枚まで）</label>
+        <!-- 💡 multiple をつけて複数選択可能に -->
+        <input type="file" id="photoFile" accept="image/*" multiple required>
+        <span class="warning-text">※一度に送れるのは5枚までです</span>
     </div>
     <button id="uploadBtn" onclick="uploadPhoto()">アップロードする</button>
     <div id="statusMessage"></div>
 </div>
 
-<!-- 🖼️ 作品一覧（最初は見えません） -->
+<!-- 🖼️ 作品一覧 -->
 <div class="gallery-container" id="galleryApp" style="display: none;">
     <h2>🖼️ あなたの提出作品一覧</h2>
     <div id="loadingText" style="text-align: center; color: #666;">読み込み中...</div>
@@ -70,26 +73,21 @@
 </div>
 
 <script>
-// 🔑 【設定】部活内だけで共有する「合言葉」を決めてください
 const CORRECT_PASSWORD = 'Tbphotoclub'; 
 
-// ★ここに新しく更新デプロイしたGASのウェブアプリURLを入れてください！
-const gasUrl = 'https://script.google.com/macros/s/AKfycbw41zP5WnldI9LVTfUiboKEw6q3ertbgrL0uWItKn81FVegXyCx6G71RwpWriAMBhZ5/exec';
+// ★ここにGASのウェブアプリURLを入れてください！
+const gasUrl = 'https://script.google.com/macros/s/AKfycbyI2JrUa3co207aJ0_2xPRbKJIRju8wu2TiUxPBtOWxwtn3NcSAzNaih14wHydhmL8c/exec';
 
-// パスワードをチェックする関数
 function checkPassword() {
     const inputPass = document.getElementById('appPassword').value;
     const lockError = document.getElementById('lockError');
 
     if (inputPass === CORRECT_PASSWORD) {
-        // パスワードが合っていたら、ロック画面を消してアプリを表示
         document.getElementById('lockScreen').style.display = 'none';
         document.getElementById('mainApp').style.display = 'block';
         document.getElementById('galleryApp').style.display = 'block';
-        // ログイン成功後に一覧を読み込む
         loadPhotos();
     } else {
-        // 間違っていたらエラーメッセージを表示
         lockError.innerText = '合言葉が違います！';
         document.getElementById('appPassword').value = '';
     }
@@ -130,47 +128,69 @@ async function loadPhotos() {
     }
 }
 
+// 💡 複数枚アップロード対応の関数
 async function uploadPhoto() {
     const fileInput = document.getElementById('photoFile');
     const nameInput = document.getElementById('memberName');
     const uploadBtn = document.getElementById('uploadBtn');
     const statusMsg = document.getElementById('statusMessage');
 
-    if (!nameInput.value.trim() || !fileInput.files[0]) {
-        alert('部員名と写真の両方を入力してください。');
+    // 名前の入力とファイルの有無をチェック
+    if (!nameInput.value.trim() || fileInput.files.length === 0) {
+        alert('部員名と写真（1枚以上）を選択してください。');
         return;
     }
 
-    const file = fileInput.files[0];
+    const files = fileInput.files;
+    const totalFiles = files.length;
+
+    // 💡 【制限】6枚以上選ばれていた場合はストップ
+    if (totalFiles > 5) {
+        alert('一度にアップロードできるのは最大5枚までです。選択し直してください。');
+        return;
+    }
+
     uploadBtn.disabled = true;
-    statusMsg.style.color = '#333';
-    statusMsg.innerText = 'アップロード中...';
 
     try {
-        const base64Data = await toBase64(file);
-        const response = await fetch(gasUrl, {
-            method: 'POST',
-            body: JSON.stringify({
-                filename: `${nameInput.value.trim()}_${file.name}`,
-                mimeType: file.type,
-                image: base64Data.split(',')[1]
-            })
-        });
+        // 💡 選択された写真の枚数分、順番にアップロードを繰り返す
+        for (let i = 0; i < totalFiles; i++) {
+            const file = files[i];
+            
+            // 💡 進捗状況と「画面を変えないで」という注意文を表示
+            statusMsg.style.color = '#333';
+            statusMsg.innerHTML = `
+                ⏳ アップロード中... (${i + 1} / ${totalFiles} 枚目)<br>
+                <span style="color: #dc3545; font-size: 13px;">⚠️ 完了するまで、この画面のまま閉じずにお待ちください。</span>
+            `;
 
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            statusMsg.style.color = 'green';
-            statusMsg.innerText = '正常にアップロードされました！';
-            fileInput.value = '';
-            nameInput.value = '';
-            loadPhotos();
-        } else {
-            throw new Error(result.message);
+            const base64Data = await toBase64(file);
+            
+            // データを送信（送りっぱなしモード）
+            await fetch(gasUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                redirect: 'follow',
+                body: JSON.stringify({
+                    filename: `${nameInput.value.trim()}_${file.name}`,
+                    mimeType: file.type,
+                    image: base64Data.split(',')[1]
+                })
+            });
         }
+
+        // すべての送信処理が終わったら成功を表示
+        statusMsg.style.color = 'green';
+        statusMsg.innerHTML = `🎉 合計 ${totalFiles} 枚の写真を正常にアップロードしました！`;
+        fileInput.value = '';
+        
+        // ドライブに写真がすべて反映されるのを少し待ってから一覧を更新
+        setTimeout(loadPhotos, 2500);
+
     } catch (error) {
         statusMsg.style.color = 'red';
-        statusMsg.innerText = 'エラーが発生しました。';
+        statusMsg.innerHTML = '❌ エラーが発生しました。';
+        console.error(error);
     } finally {
         uploadBtn.disabled = false;
     }
